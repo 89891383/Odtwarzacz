@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const { 
   joinVoiceChannel, 
   createAudioPlayer, 
@@ -6,8 +6,7 @@ const {
   StreamType,
   NoSubscriberBehavior,
   AudioPlayerStatus,
-  getVoiceConnection,
-  VoiceConnectionStatus
+  getVoiceConnection
 } = require('@discordjs/voice');
 const { spawn } = require('child_process');
 const express = require('express');
@@ -40,19 +39,22 @@ app.get('/', (req, res) => {
         <div class="commands">
           <h2>Dostępne komendy:</h2>
           <div class="command">
-            <span class="command-name">/play</span> - Odtwarza multimedia z podanego URL
+            <span class="command-name">!play [url]</span> - Odtwarza multimedia z podanego URL
           </div>
           <div class="command">
-            <span class="command-name">/pause</span> - Wstrzymuje odtwarzanie
+            <span class="command-name">!pause</span> - Wstrzymuje odtwarzanie
           </div>
           <div class="command">
-            <span class="command-name">/resume</span> - Wznawia odtwarzanie
+            <span class="command-name">!resume</span> - Wznawia odtwarzanie
           </div>
           <div class="command">
-            <span class="command-name">/rewind</span> - Przewija do podanego czasu
+            <span class="command-name">!rewind [time]</span> - Przewija do podanego czasu
           </div>
           <div class="command">
-            <span class="command-name">/stop</span> - Zatrzymuje odtwarzanie
+            <span class="command-name">!stop</span> - Zatrzymuje odtwarzanie
+          </div>
+          <div class="command">
+            <span class="command-name">!help</span> - Wyświetla pomoc
           </div>
         </div>
       </body>
@@ -68,9 +70,14 @@ app.listen(PORT, () => {
 const client = new Client({ 
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildVoiceStates
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.MessageContent
   ] 
 });
+
+// Prefix dla komend
+const PREFIX = '!';
 
 // Stan aktualnie odtwarzanych mediów
 const streamingSessions = new Map();
@@ -138,117 +145,82 @@ function streamFromUrl(url, guildId, startTime = 0) {
   });
 }
 
-// Rejestracja komend slash
-async function registerCommands() {
-  try {
-    const commands = [
-      new SlashCommandBuilder()
-        .setName('play')
-        .setDescription('Odtwarza media z podanego URL')
-        .addStringOption(option =>
-          option.setName('url')
-            .setDescription('Link do pliku multimedialnego (mp4, mkv, itp.)')
-            .setRequired(true)),
-      new SlashCommandBuilder()
-        .setName('stop')
-        .setDescription('Zatrzymuje odtwarzanie i rozłącza bota'),
-      new SlashCommandBuilder()
-        .setName('pause')
-        .setDescription('Wstrzymuje odtwarzanie'),
-      new SlashCommandBuilder()
-        .setName('resume')
-        .setDescription('Wznawia odtwarzanie'),
-      new SlashCommandBuilder()
-        .setName('rewind')
-        .setDescription('Przewija do wybranego czasu')
-        .addStringOption(option =>
-          option.setName('time')
-            .setDescription('Czas do przewinięcia (np. 1:30, 01:30, 01:30:00)')
-            .setRequired(true))
-    ];
-    
-    console.log('[DISCORD] Rozpoczęcie odświeżania komend aplikacji (/).');
-    
-    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN);
-    
-    const data = await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: commands.map(command => command.toJSON()) },
-    );
-    
-    console.log(`[DISCORD] Pomyślnie zarejestrowano ${data.length} komend slash.`);
-  } catch (error) {
-    console.error('[ERROR] Błąd podczas rejestracji komend:', error);
-  }
-}
-
 // Gdy bot jest gotowy
-client.once('ready', async () => {
+client.once('ready', () => {
   console.log(`[BOT] Zalogowano jako ${client.user.tag}!`);
   
-  // Zarejestruj komendy
-  await registerCommands();
-  
   // Ustaw aktywność bota
-  client.user.setActivity('/play', { type: 'LISTENING' });
+  client.user.setActivity(`${PREFIX}help`, { type: 'LISTENING' });
 });
 
-// Obsługa komend
-client.on('interactionCreate', async interaction => {
-  if (!interaction.isCommand()) return;
-
-  const { commandName } = interaction;
-  console.log(`[BOT] Otrzymano komendę: ${commandName}`);
-
-  if (commandName === 'play') {
+// Obsługa wiadomości
+client.on('messageCreate', async message => {
+  // Ignoruj wiadomości od botów i wiadomości bez prefiksu
+  if (message.author.bot || !message.content.startsWith(PREFIX)) return;
+  
+  // Parsuj komendę i argumenty
+  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+  const command = args.shift().toLowerCase();
+  
+  console.log(`[BOT] Otrzymano komendę: ${command}`);
+  
+  // Komenda help
+  if (command === 'help') {
+    const helpEmbed = new EmbedBuilder()
+      .setColor('#5865F2')
+      .setTitle('Pomoc - Komendy Bota')
+      .setDescription('Lista dostępnych komend:')
+      .addFields(
+        { name: `${PREFIX}play [url]`, value: 'Odtwarza multimedia z podanego URL' },
+        { name: `${PREFIX}pause`, value: 'Wstrzymuje odtwarzanie' },
+        { name: `${PREFIX}resume`, value: 'Wznawia odtwarzanie' },
+        { name: `${PREFIX}rewind [time]`, value: 'Przewija do podanego czasu (np. 1:30, 01:30:00)' },
+        { name: `${PREFIX}stop`, value: 'Zatrzymuje odtwarzanie i rozłącza bota' }
+      )
+      .setFooter({ text: 'Media Bot' });
+      
+    return message.reply({ embeds: [helpEmbed] });
+  }
+  
+  // Komenda play
+  if (command === 'play') {
     // Sprawdź, czy użytkownik jest na kanale głosowym
-    if (!interaction.member.voice.channelId) {
-      return interaction.reply({ 
-        content: 'Musisz być na kanale głosowym, aby użyć tej komendy!', 
-        ephemeral: true 
-      });
+    if (!message.member.voice.channelId) {
+      return message.reply('Musisz być na kanale głosowym, aby użyć tej komendy!');
     }
     
-    const url = interaction.options.getString('url');
+    const url = args[0];
+    if (!url) {
+      return message.reply('Musisz podać URL do odtworzenia! Użyj: `!play [url]`');
+    }
     
     // Sprawdź, czy URL wygląda poprawnie
     if (!url.match(/^https?:\/\/.+/i)) {
-      return interaction.reply({ 
-        content: 'Podany URL nie wygląda na prawidłowy link.', 
-        ephemeral: true 
-      });
+      return message.reply('Podany URL nie wygląda na prawidłowy link.');
     }
     
-    await interaction.reply(`Przygotowuję do odtworzenia: ${url}`);
+    const replyMessage = await message.reply(`Przygotowuję do odtworzenia: ${url}`);
     
     try {
       // Sprawdź, czy istnieje już połączenie dla tego serwera i zniszcz je
-      const existingConnection = getVoiceConnection(interaction.guildId);
+      const existingConnection = getVoiceConnection(message.guildId);
       if (existingConnection) {
-        const existingSession = streamingSessions.get(interaction.guildId);
+        const existingSession = streamingSessions.get(message.guildId);
         if (existingSession && existingSession.ffmpeg) {
           existingSession.ffmpeg.kill();
         }
         existingConnection.destroy();
-        streamingSessions.delete(interaction.guildId);
+        streamingSessions.delete(message.guildId);
       }
       
       // Połącz z kanałem głosowym
       const connection = joinVoiceChannel({
-        channelId: interaction.member.voice.channelId,
-        guildId: interaction.guildId,
-        adapterCreator: interaction.guild.voiceAdapterCreator,
+        channelId: message.member.voice.channelId,
+        guildId: message.guildId,
+        adapterCreator: message.guild.voiceAdapterCreator,
       });
-
-      connection.on(VoiceConnectionStatus.Disconnected, () => {
-        // Obsługa rozłączenia
-        console.log(`[BOT] Rozłączono z kanałem głosowym na serwerze ${interaction.guildId}`);
-        const session = streamingSessions.get(interaction.guildId);
-        if (session && session.ffmpeg) {
-          session.ffmpeg.kill();
-        }
-        streamingSessions.delete(interaction.guildId);
-      });
+      
+      await replyMessage.edit('Sprawdzam dostępność URL...');
       
       // Utwórz odtwarzacz audio
       const player = createAudioPlayer({
@@ -257,11 +229,8 @@ client.on('interactionCreate', async interaction => {
         },
       });
       
-      // Sprawdź, czy URL jest dostępny
-      await interaction.editReply('Sprawdzam dostępność URL...');
-      
       // Utwórz streamowanie z URL
-      const ffmpegProcess = await streamFromUrl(url, interaction.guildId);
+      const ffmpegProcess = await streamFromUrl(url, message.guildId);
       
       // Utwórz zasób audio ze strumienia FFmpeg
       const resource = createAudioResource(ffmpegProcess.stdout, {
@@ -269,129 +238,117 @@ client.on('interactionCreate', async interaction => {
       });
       
       // Zapisz informacje o sesji
-      streamingSessions.set(interaction.guildId, {
+      streamingSessions.set(message.guildId, {
         url,
         player,
         ffmpeg: ffmpegProcess,
         startTime: 0,
-        isPaused: false
+        isPaused: false,
+        textChannel: message.channel.id
       });
       
       // Odtwórz zasób audio
       player.play(resource);
       connection.subscribe(player);
       
-      await interaction.editReply(`Odtwarzam multimedia z: ${url}`);
+      await replyMessage.edit(`Odtwarzam multimedia z: ${url}`);
       
       // Obsługa zakończenia odtwarzania
       player.on(AudioPlayerStatus.Idle, () => {
-        const session = streamingSessions.get(interaction.guildId);
+        const session = streamingSessions.get(message.guildId);
         if (session && !session.isPaused) {
           connection.destroy();
           if (session.ffmpeg) {
             session.ffmpeg.kill();
           }
-          streamingSessions.delete(interaction.guildId);
-          interaction.channel.send(`Zakończono odtwarzanie: ${url}`);
+          const channel = client.channels.cache.get(session.textChannel);
+          if (channel) {
+            channel.send(`Zakończono odtwarzanie: ${url}`);
+          }
+          streamingSessions.delete(message.guildId);
         }
       });
     } catch (error) {
       console.error('[ERROR] Błąd podczas odtwarzania:', error);
-      interaction.editReply('Wystąpił błąd podczas odtwarzania multimediów. Sprawdź, czy URL jest poprawny i dostępny.');
+      replyMessage.edit('Wystąpił błąd podczas odtwarzania multimediów. Sprawdź, czy URL jest poprawny i dostępny.');
     }
   }
   
-  if (commandName === 'stop') {
+  // Komenda stop
+  if (command === 'stop') {
     try {
-      const connection = getVoiceConnection(interaction.guildId);
+      const connection = getVoiceConnection(message.guildId);
       if (connection) {
-        const session = streamingSessions.get(interaction.guildId);
+        const session = streamingSessions.get(message.guildId);
         if (session && session.ffmpeg) {
           session.ffmpeg.kill();
         }
         connection.destroy();
-        streamingSessions.delete(interaction.guildId);
-        interaction.reply('Zatrzymano odtwarzanie i rozłączono z kanałem głosowym.');
+        streamingSessions.delete(message.guildId);
+        message.reply('Zatrzymano odtwarzanie i rozłączono z kanałem głosowym.');
       } else {
-        interaction.reply({ 
-          content: 'Bot nie jest obecnie połączony z kanałem głosowym.', 
-          ephemeral: true 
-        });
+        message.reply('Bot nie jest obecnie połączony z kanałem głosowym.');
       }
     } catch (error) {
       console.error('[ERROR] Błąd podczas zatrzymywania:', error);
-      interaction.reply({ 
-        content: 'Wystąpił błąd podczas zatrzymywania odtwarzania.', 
-        ephemeral: true 
-      });
+      message.reply('Wystąpił błąd podczas zatrzymywania odtwarzania.');
     }
   }
   
-  if (commandName === 'pause') {
+  // Komenda pause
+  if (command === 'pause') {
     try {
-      const session = streamingSessions.get(interaction.guildId);
+      const session = streamingSessions.get(message.guildId);
       if (session && session.player) {
         session.player.pause();
         session.isPaused = true;
-        interaction.reply('Wstrzymano odtwarzanie.');
+        message.reply('Wstrzymano odtwarzanie.');
       } else {
-        interaction.reply({ 
-          content: 'Nic nie jest obecnie odtwarzane.', 
-          ephemeral: true 
-        });
+        message.reply('Nic nie jest obecnie odtwarzane.');
       }
     } catch (error) {
       console.error('[ERROR] Błąd podczas wstrzymywania:', error);
-      interaction.reply({ 
-        content: 'Wystąpił błąd podczas wstrzymywania odtwarzania.', 
-        ephemeral: true 
-      });
+      message.reply('Wystąpił błąd podczas wstrzymywania odtwarzania.');
     }
   }
   
-  if (commandName === 'resume') {
+  // Komenda resume
+  if (command === 'resume') {
     try {
-      const session = streamingSessions.get(interaction.guildId);
+      const session = streamingSessions.get(message.guildId);
       if (session && session.player) {
         session.player.unpause();
         session.isPaused = false;
-        interaction.reply('Wznowiono odtwarzanie.');
+        message.reply('Wznowiono odtwarzanie.');
       } else {
-        interaction.reply({ 
-          content: 'Nic nie jest obecnie odtwarzane lub wstrzymane.', 
-          ephemeral: true 
-        });
+        message.reply('Nic nie jest obecnie odtwarzane lub wstrzymane.');
       }
     } catch (error) {
       console.error('[ERROR] Błąd podczas wznawiania:', error);
-      interaction.reply({ 
-        content: 'Wystąpił błąd podczas wznawiania odtwarzania.', 
-        ephemeral: true 
-      });
+      message.reply('Wystąpił błąd podczas wznawiania odtwarzania.');
     }
   }
   
-  if (commandName === 'rewind') {
+  // Komenda rewind
+  if (command === 'rewind') {
     try {
-      const session = streamingSessions.get(interaction.guildId);
+      const session = streamingSessions.get(message.guildId);
       if (!session) {
-        return interaction.reply({ 
-          content: 'Nic nie jest obecnie odtwarzane.', 
-          ephemeral: true 
-        });
+        return message.reply('Nic nie jest obecnie odtwarzane.');
       }
       
-      const timeStr = interaction.options.getString('time');
+      const timeStr = args[0];
+      if (!timeStr) {
+        return message.reply('Musisz podać czas do przewinięcia! Użyj: `!rewind [czas]` (np. `!rewind 1:30`)');
+      }
+      
       const targetTime = parseTimeString(timeStr);
       
       if (isNaN(targetTime) || targetTime < 0) {
-        return interaction.reply({ 
-          content: 'Nieprawidłowy format czasu. Użyj formatu mm:ss (np. 1:30) lub hh:mm:ss (np. 01:30:00).', 
-          ephemeral: true 
-        });
+        return message.reply('Nieprawidłowy format czasu. Użyj formatu mm:ss (np. 1:30) lub hh:mm:ss (np. 01:30:00).');
       }
       
-      await interaction.reply(`Przewijam do ${timeStr}...`);
+      const replyMessage = await message.reply(`Przewijam do ${timeStr}...`);
       
       // Zaktualizuj czas rozpoczęcia dla przyszłych rewindów
       session.startTime = targetTime;
@@ -403,7 +360,7 @@ client.on('interactionCreate', async interaction => {
       session.player.stop();
       
       // Rozpocznij nowe streamowanie od wybranego czasu
-      const ffmpegProcess = await streamFromUrl(session.url, interaction.guildId, targetTime);
+      const ffmpegProcess = await streamFromUrl(session.url, message.guildId, targetTime);
       
       // Utwórz nowy zasób audio
       const resource = createAudioResource(ffmpegProcess.stdout, {
@@ -416,14 +373,11 @@ client.on('interactionCreate', async interaction => {
       // Odtwórz zasób audio
       session.player.play(resource);
       
-      interaction.editReply(`Przewinięto do ${timeStr}`);
+      replyMessage.edit(`Przewinięto do ${timeStr}`);
       
     } catch (error) {
       console.error('[ERROR] Błąd podczas przewijania:', error);
-      interaction.reply({ 
-        content: 'Wystąpił błąd podczas przewijania.', 
-        ephemeral: true 
-      });
+      message.reply('Wystąpił błąd podczas przewijania.');
     }
   }
 });
